@@ -39,6 +39,8 @@
 #import "os_apple_embedded.h"
 #import "tts_apple_embedded.h"
 
+#import "file_picker_delegate.h"
+
 #include "core/config/project_settings.h"
 #include "core/io/file_access_pack.h"
 
@@ -366,11 +368,11 @@ bool DisplayServerAppleEmbedded::has_feature(Feature p_feature) const {
 		// case FEATURE_IME:
 		// case FEATURE_MOUSE:
 		// case FEATURE_MOUSE_WARP:
-		// case FEATURE_NATIVE_DIALOG:
-		// case FEATURE_NATIVE_DIALOG_INPUT:
-		// case FEATURE_NATIVE_DIALOG_FILE:
+		case FEATURE_NATIVE_DIALOG:
+		case FEATURE_NATIVE_DIALOG_INPUT:
+		case FEATURE_NATIVE_DIALOG_FILE:
 		// case FEATURE_NATIVE_DIALOG_FILE_EXTRA:
-		// case FEATURE_NATIVE_DIALOG_FILE_MIME:
+		case FEATURE_NATIVE_DIALOG_FILE_MIME:
 		// case FEATURE_NATIVE_ICON:
 		// case FEATURE_WINDOW_TRANSPARENCY:
 		case FEATURE_CLIPBOARD:
@@ -776,6 +778,101 @@ String DisplayServerAppleEmbedded::clipboard_get() const {
 	NSString *text = [UIPasteboard generalPasteboard].string;
 
 	return String::utf8([text UTF8String]);
+}
+
+Error DisplayServerAppleEmbedded::dialog_show(String p_title, String p_description, Vector<String> p_buttons, const Callable &p_callback) {
+	NSString *title = [NSString stringWithUTF8String:p_title.utf8().get_data()];
+	NSString *message = [NSString stringWithUTF8String:p_description.utf8().get_data()];
+
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+																   message:message
+															preferredStyle:UIAlertControllerStyleAlert];
+
+	for (int i = 0; i < p_buttons.size(); i++) {
+		NSString *button_title = [NSString stringWithUTF8String:p_buttons[i].utf8().get_data()];
+
+		UIAlertAction *button = [UIAlertAction actionWithTitle:button_title
+														 style:UIAlertActionStyleDefault
+													   handler:^(UIAlertAction *_Nonnull action) {
+															if (p_callback.is_valid()) {
+																Variant index = i;
+																const Variant *args[1] = { &index };
+																Variant ret;
+																Callable::CallError ce;
+
+																p_callback.callp(args, 1, ret, ce);
+																if (ce.error != Callable::CallError::CALL_OK) {
+																	ERR_PRINT(vformat("Failed to execute dialog callback: %s.", Variant::get_callable_error_text(p_callback, args, 1, ce)));
+																}
+															}
+													   }];
+		[alert addAction:button];
+	}
+
+	[GDTAppDelegateService.viewController presentViewController:alert animated:YES completion:nil];
+
+	return OK;
+}
+
+Error DisplayServerAppleEmbedded::dialog_input_text(String p_title, String p_description, String p_partial, const Callable &p_callback) {
+	NSString *title = [NSString stringWithUTF8String:p_title.utf8().get_data()];
+	NSString *description = [NSString stringWithUTF8String:p_description.utf8().get_data()];
+	NSString *text = [NSString stringWithUTF8String:p_partial.utf8().get_data()];
+
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+																   message:description
+															preferredStyle:UIAlertControllerStyleAlert];
+
+	[alert addTextFieldWithConfigurationHandler:^(UITextField *_Nonnull textField) {
+		textField.text = text;
+	}];
+
+	UIAlertAction *button = [UIAlertAction actionWithTitle:@"OK"
+												     style:UIAlertActionStyleDefault
+												   handler:^(UIAlertAction *_Nonnull action) {
+														if (p_callback.is_valid()) {
+															UITextField *inputField = alert.textFields.firstObject;
+															Variant inputFieldString = String::utf8([inputField.text UTF8String]);
+															const Variant *args[1] = { &inputFieldString };
+															Variant ret;
+															Callable::CallError ce;
+
+															p_callback.callp(args, 1, ret, ce);
+															if (ce.error != Callable::CallError::CALL_OK) {
+																ERR_PRINT(vformat("Failed to execute input dialog callback: %s.", Variant::get_callable_error_text(p_callback, args, 1, ce)));
+															}
+														}
+												   }];
+	[alert addAction:button];
+
+	[GDTAppDelegateService.viewController presentViewController:alert animated:YES completion:nil];
+
+	return OK;
+}
+
+Error DisplayServerAppleEmbedded::file_dialog_show(const String &p_title, const String &p_current_directory, const String &p_filename, bool p_show_hidden, FileDialogMode p_mode, const Vector<String> &p_filters, const Callable &p_callback, WindowID p_window_id) {
+	// map Godot FileDialogMode to iOS DocumentPicker modes
+	bool select_folder = (p_mode == FILE_DIALOG_MODE_OPEN_DIR);
+
+	// Map Filters to UTTypes (Uniform Type Identifiers)
+	NSMutableArray<UTType *> *types = [NSMutableArray new];
+	if (select_folder) {
+		[types addObject:UTTypeFolder];
+	} else {
+		[types addObject:UTTypeData];
+	}
+
+	UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+
+	FilePickerDelegate *delegate = [[FilePickerDelegate alloc] initWithCallback:p_callback];
+	file_picker_delegate = delegate;
+	picker.delegate = delegate;
+	picker.allowsMultipleSelection = (p_mode == FILE_DIALOG_MODE_OPEN_FILES);
+	picker.shouldShowFileExtensions = p_show_hidden;
+
+	[GDTAppDelegateService.viewController presentViewController:picker animated:YES completion:nil];
+
+	return OK;
 }
 
 void DisplayServerAppleEmbedded::screen_set_keep_on(bool p_enable) {

@@ -67,6 +67,8 @@ class DisplayServerAppleEmbedded : public DisplayServer {
 	NativeMenu *native_menu = nullptr;
 
 	id tts = nullptr;
+	
+	id file_picker_delegate = nullptr;
 
 	DisplayServer::ScreenOrientation screen_orientation;
 
@@ -224,6 +226,12 @@ public:
 
 	virtual void clipboard_set(const String &p_text) override;
 	virtual String clipboard_get() const override;
+
+	virtual Error dialog_show(String p_title, String p_description, Vector<String> p_buttons, const Callable &p_callback) override;
+
+	virtual Error dialog_input_text(String p_title, String p_description, String p_partial, const Callable &p_callback) override;
+
+	virtual Error file_dialog_show(const String &p_title, const String &p_current_directory, const String &p_filename, bool p_show_hidden, const FileDialogMode p_mode, const Vector<String> &p_filters, const Callable &p_callback, WindowID p_window_id) override;
 
 	virtual void screen_set_keep_on(bool p_enable) override;
 	virtual bool screen_is_kept_on() const override;
